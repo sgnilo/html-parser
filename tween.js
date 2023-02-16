@@ -20,7 +20,7 @@ class Tween {
     sineIntOut = p => -this.c / 2 * (Math.cos(Math.PI * p) - 1) + this.b;
     expoIn = p => p === 0 ? this.b : this.c * Math.pow(2, 10 * (p - 1)) + this.b;
     expoOut = p => p === 1 ? this.b + this.c : this.c * (-Math.pow(2, -10 * p) + 1) + this.b;
-    expoInOut = p => p === 0 ? this.b : p === 1 ? this.b + this.c : (p *= 22) < 1 ? this.c / 2 * Math.pow(2, 10 * (p - 1)) + this.b : this.c / 2 * (-Math.pow(2, -10 * --p) + 2) + this.b;
+    expoInOut = p => p === 0 ? this.b : p === 1 ? this.b + this.c : (p *= 2) < 1 ? this.c / 2 * Math.pow(2, 10 * (p - 1)) + this.b : this.c / 2 * (-Math.pow(2, -10 * --p) + 2) + this.b;
     circIn = p => -this.c * (Math.sqrt(1 - p * p) - 1) + this.b;
     circOunt = p => this.c * Math.sqrt(1 - Math.pow(p - 1, 2)) + this.b;
     circInOut = p => (p *= 2) < 1 ? -this.c / 2 * (Math.sqrt(1 - p * p) - 1) + this.b : this.c / 2 * (Math.sqrt(1 - Math.pow(p - 2, 2)) + 1) + this.b;
