@@ -1,18 +1,26 @@
-const tagName = '[a-zA-Z]*[a-zA-Z_0-9]*';
+// const tagName = '([a-zA-Z])+((_|-)*([a-zA-Z0-9]))*';
 const doctype = /^\s?<!DOCTYPE [^>]+>/i;
-const openTag = new RegExp(`^\s?<${tagName}[^>]+>`);
-const closeTag = new RegExp(`^\s?<\/${tagName}>`);
-const commentTag = /^\s?<!--[^\1]+(-->)/;
-const selfTag = /^\s?<(meta|link|br|hr|img|input)\s?([^>]+)?\/?>/;
+const openTag = /^\s*<([a-zA-Z])+((_|-)*([a-zA-Z0-9]))*[^>]*>/;
+const closeTag = /^\s*<\/([a-zA-Z])+((_|-)*([a-zA-Z0-9]))*>/;
+const commentTag = /^\s*<!--[^>]+(-->)/;
+const selfTag = /^\s*<(meta|link|br|hr|img|input|base|circle|path)\s?([^>]+)?\/?>/;
 const specialSelfTag = /^\s?<[a-zA-Z]+\s[^>]+\/>/;
 const text = /^[^<]+/;
-const attribute = /\s[^=]+="[^"]+"/g;
-const shortAttr = /\s[^\s="]+\b/g;
+const attribute = /\s[^=\s]+="[^"]+"/g;
+const shortAttr = /\s[^\s=<"]+\b/g;
 const emptyText = /^\s*$/;
+
+
+const blockElements = ['div', 'ul', 'li', 'dl', 'dt', 'dd', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote'];
+
+const trim = str => str.replace(/^\s*/, '').replace(/\s*$/, '');
+
+const deepTrace = [];
 
 class Element {
     constructor(token, type, deep, children) {
-        this.token = token;
+        this.token = trim(token);
+		this.rawToken = token;
         this.type = type;
         this.deep = deep;
         this.children = children;
@@ -29,8 +37,6 @@ class Element {
     }
 };
 
-const trim = str => str.replace(/^\s*/, '').replace(/\s*$/, '');
-
 const assignDomTree = (stack) => {
 	let preNode = null;
 	let rootNode = null
@@ -41,13 +47,17 @@ const assignDomTree = (stack) => {
 		if (!preNode) {
 			preNode = currentNode;
 			rootNode = currentNode;
+			// console.log('找到了根结点', rootNode);
 			continue;
 		}
 		if (currentNode.deep > preNode.deep) {
+			// console.log('找子节点ing', preNode.deep, currentNode.deep);
             // currentNode.parent = preNode;
 			preNode.children.unshift(currentNode);
 		} else {
-			const parent = findByDeep(rootNode, currentNode.deep - 1);
+			// console.log('找同级节点/切换树了', preNode.deep, currentNode.deep)
+			// const parent = findByDeep(rootNode, currentNode.deep - 1);
+			// console.log('找到新的位置了', parent.deep, currentNode.deep);
             // currentNode.parent = parent;
 			parent.children.unshift(currentNode);
 		}
@@ -67,6 +77,7 @@ const assignDomTree = (stack) => {
 };
 
 const findByDeep = (node, deep) => {
+	// console.log('looking..', node.deep, `${new Array(node.deep).fill('\t').join()}<${node.tagName} ${node.class || ''}>`, deep);
 	if (node.deep === deep) {
 		return node;
 	} else if (node.deep < deep) {
@@ -78,10 +89,16 @@ const findByDeep = (node, deep) => {
 
 const makeNode = (token, type, deep, children = []) => {
     const node = new Element(token, type, deep, children);
+	deepTrace.push(deep);
 	if (type === 'comment' || type === 'text') {
 		return node;
 	}
-	const tagName = (token.match(/<[a-zA-Z]*[a-zA-Z_0-9]*(\s|>)/) || [])[0].replace('<', '').replace(/(\s|>)/, '');
+    const tagNameMatches = token.match(/<(([a-zA-Z])+((_|-)*([a-zA-Z0-9]))*)(\s|>)/) || [];
+    if (!tagNameMatches.length) {
+        console.log('Parsing unexcepted token', token, type);
+        throw new Error();
+    }
+	const tagName = tagNameMatches[1].replace('<', '').replace(/(\s|>)/, '');
 	node.tagName = tagName;
 	const attributes = token.match(attribute) || [];
 	attributes.forEach((attribute) => {
@@ -102,7 +119,19 @@ const parse = (html) => {
 	};
     const tokenStack = [];
 	const eleStack = [];
+	let noChildTreeFlag = false;
     while (html) {
+		if (noChildTreeFlag) {
+			const closeTag = html.match(/(<\/((script)|(style))>)/);
+			if (closeTag) {
+				const scriptOrStyleContentOffset = closeTag.index - closeTag[0].length;
+				const scriptOrStyleContent = html.substring(0, scriptOrStyleContentOffset);
+				eleStack.push(makeNode(scriptOrStyleContent, 'text', tokenStack.length));
+				clip(scriptOrStyleContentOffset)
+				noChildTreeFlag = false;
+				continue;
+			}
+		}
 		const doctypeMatch = html.match(doctype);
 		if (doctypeMatch) {
 			clip(doctypeMatch[0].length);
@@ -127,15 +156,21 @@ const parse = (html) => {
 		if (closeTagMatch) {
             // 元素闭合标签
 			const token = tokenStack.pop();
-			if (token) {
-				eleStack.push(makeNode(token, 'common', tokenStack.length));
-			} else {
+			if (!token) {
+				console.log(eleStack);
 				throw new Error(`没有匹配到元素的开始标签！\t${closeTagMatch[0]}`);
 			}
-			const tagName = closeTagMatch[0].replace(/<\//, '').replace(/>/, '');
+			const tagName = trim(closeTagMatch[0].replace(/<\//, '').replace(/>/, ''));
 			if (token.indexOf(tagName) < 0) {
-				throw new Error(`元素开始和闭合标签不对应：\t${closeTagMatch[0]}\t${token}`);
+                let miniMatch = token;
+                while (/<p/.test(miniMatch) && blockElements.includes(tagName)) {
+                    miniMatch = tokenStack.pop();
+                }
+                if (miniMatch.indexOf(tagName) < 0) {
+                    throw new Error(`元素开始和闭合标签不对应：\t[${closeTagMatch[0]}]\t[${token}]\t[${miniMatch}]\t[${tagName}]`);
+                }
 			}
+			eleStack.push(makeNode(token, 'common', tokenStack.length));
 			clip(closeTagMatch[0].length);
 			continue;
         }
@@ -144,6 +179,9 @@ const parse = (html) => {
             // 元素开始标签
 			const token = openTagMatch[0];
 			tokenStack.push(token);
+			if (/<(script|style)/.test(token)) {
+				noChildTreeFlag = true;
+			}
 			clip(token.length);
 			continue;
         }
@@ -157,8 +195,9 @@ const parse = (html) => {
 			clip(textMatch[0].length);
 			continue;
         } else {
+            console.log(eleStack);
           // 不知道是什么
-		  throw new Error(`解析失败！\t${html.substring(0, 100)}\t${tokenStack.pop()}\t${JSON.stringify(eleStack.pop())}`);
+		  throw new Error(`解析失败！\t${html.substring(0, 100)}\n${tokenStack.pop()}\n${JSON.stringify(eleStack.pop())}`);
         }
     }
 	return assignDomTree(eleStack);
